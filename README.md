@@ -3,6 +3,8 @@ BikeAlternatorLEDHeadlight
 
 Bicycle Alterator/LED Headlight control system.
 Runs on an Arduino/ATMEGA328.
+
+UNFINISHED CODE
   
 * LED brightness based on alternator output power, in consideration of:
   - Total system load, including uC and battery charging needs.
