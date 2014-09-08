@@ -1,7 +1,7 @@
-BikeAlternatorLEDHeadlight
+Bike_Alternator_and_LED_Headlight
 ==========================
 
-Bicycle Alterator/LED Headlight control system.
+Bicycle Alterator and LED Headlight control system.
 Runs on an Arduino/ATMEGA328.
 
 UNFINISHED CODE
