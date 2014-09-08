@@ -78,16 +78,16 @@ int alternatorVoltageMin = 170;    // 5V/6/ADC - Minimum alternator output volta
 int batteryCurrentMax = 77;        // 2A (from ref above) - Maximum battery backup drain current
 
 // Calibration and calculated values
-int led1PwmOut = 0;                      // PWM output value for LED1
-int led2PwmOut = 0;                      // PWM output value for LED2
-int systemLedBrightnessOut = 0;             // Overall LED brightness scale
-int systemLedBrightnessMax = 447;        // 447 Overall LED brightness range. LED PWMs are is mapped into this so that LED1 is almost full bright before LED2 starts to light.
-int systemLedBrightnessMin = 48;         // Minimum useful PWM value, below which the LED is off or won't dim any further (low dead zone).
-byte systemImpedanceOpt = 31;            // Optimum impedance load on the alternator, in terms of ADC scale. We allow +/- 3
-byte systemImpedanceGap = 3;             // Dead zone centered around the the systemImpedanceOpt value. Reduces flicker. 
-unsigned int systemImpedanceInit = 100;  // Start the calculated impedance at a safe value.
-byte systemRunMode = 0;                  // Used for debugging
-byte ledPwmIncrement = 1;                // LED PWM output increment value
+int led1PwmOut = 0;                // PWM output value for LED1
+int led2PwmOut = 0;                // PWM output value for LED2
+int systemLedBrightnessOut = 0;    // Overall LED brightness scale
+int systemLedBrightnessMax = 447;  // 447 Overall LED brightness range. LED PWMs are is mapped into this so that LED1 is almost full bright before LED2 starts to light.
+int systemLedBrightnessMin = 48;   // Minimum useful PWM value, below which the LED is off or won't dim any further (low dead zone).
+int systemImpedanceOpt = 31;       // Optimum impedance load on the alternator, in terms of ADC scale. We allow +/- 3
+int systemImpedanceGap = 3;        // Dead zone centered around the the systemImpedanceOpt value. Reduces flicker. 
+int systemImpedanceGoal = 100;     // Start the calculated impedance at a safe value.
+byte systemRunMode = 0;            // Used for debugging
+byte ledPwmIncrement = 1;          // LED PWM output increment value
 
 //#define DEBUG
 
@@ -95,7 +95,7 @@ void setup() {
   #ifdef DEBUG
     Serial.begin(9600);
   #endif
-  TCCR1B = TCCR1B & 0b11111000 | 0x01; // Sets LED PWM freq to ~31,250Hz
+  TCCR1B = TCCR1B & 0b11111000 | 0x01;  // Sets LED PWM freq to ~31,250Hz
   pinMode(led1PwmPin, OUTPUT);
   pinMode(led2PwmPin, OUTPUT);
   pinMode(alarmPin, OUTPUT);
@@ -104,8 +104,8 @@ void setup() {
   pinMode(indicatorBluePin, OUTPUT);
   pinMode(led1EnablePin, OUTPUT);
   pinMode(led2EnablePin, OUTPUT);
-  analogWrite(led1PwmPin, 255-systemLedBrightnessMin);      // Driver dimming is inverted (255=off, 0=max). Use analogWrite(PIN,255-VAL);)
-  analogWrite(led2PwmPin, 255);      // Driver dimming is inverted (255=off, 0=max). Use analogWrite(PIN,255-VAL);)
+  analogWrite(led1PwmPin, 255-systemLedBrightnessMin);  // Driver dimming is inverted (255=off, 0=max). Use analogWrite(PIN,255-VAL);)
+  analogWrite(led2PwmPin, 255);                         // Driver dimming is inverted (255=off, 0=max). Use analogWrite(PIN,255-VAL);)
   digitalWrite(alarmPin, LOW);
   digitalWrite(indicatorRedPin, LOW);
   digitalWrite(indicatorGreenPin, LOW);
@@ -122,12 +122,12 @@ void readSensors(){
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
 }
 
-void adjustLEDPWM(){
-  if ( systemImpedanceInit >= (systemImpedanceOpt + systemImpedanceGap) ){ increaseLEDPWM(); }
-  if ( systemImpedanceInit <= (systemImpedanceOpt - systemImpedanceGap) ){ decreaseLEDPWM(); }
+void adjustLedPwm(){
+  if ( systemImpedanceGoal >= (systemImpedanceOpt + systemImpedanceGap) ){ increaseLedPwm(); }
+  if ( systemImpedanceGoal <= (systemImpedanceOpt - systemImpedanceGap) ){ decreaseLedPwm(); }
 }
 
-void setLEDs(){
+void setMainLeds(){
   if ( systemLedBrightnessOut > systemLedBrightnessMax ){ systemLedBrightnessOut = systemLedBrightnessMax; }
   if ( systemLedBrightnessOut < systemLedBrightnessMin ){ systemLedBrightnessOut = systemLedBrightnessMin; }
   led1PwmOut = systemLedBrightnessOut;
@@ -138,23 +138,23 @@ void setLEDs(){
   analogWrite(led2PwmPin,255-led2PwmOut);
 }
 
-void increaseLEDPWM(){
+void increaseLedPwm(){
   if ( systemLedBrightnessOut <= systemLedBrightnessMax ){
     systemLedBrightnessOut = systemLedBrightnessOut + ledPwmIncrement;
   }
-  setLEDs();
+  setMainLeds();
 }
 
-void decreaseLEDPWM(){ // Decrease by 10% via integer math
+void decreaseLedPwm(){ // Decrease by 10% via integer math
   if ( systemLedBrightnessOut >= systemLedBrightnessMin ){
     systemLedBrightnessOut = systemLedBrightnessOut - ledPwmIncrement; 
   }
-  setLEDs();
+  setMainLeds();
 }
 
 void checkOverCurrent(){
   while ( batteryCurrentIn >= batteryCurrentMax ) {
-    decreaseLEDPWM();
+    decreaseLedPwm();
     readSensors();
   }
 }
@@ -163,29 +163,29 @@ void loop() {
 //  if ( ledPwmIncrement < 0 ) { ledPwmIncrement=1; }
   readSensors();
   checkOverCurrent();
-  systemImpedanceInit = alternatorVoltageIn/(alternatorCurrentIn+(batteryCurrentIn/4));
+  systemImpedanceGoal = alternatorVoltageIn/(alternatorCurrentIn+(batteryCurrentIn/4));
   if ( alternatorVoltageIn > alternatorVoltageMax ){  // Above max alternator output voltage
     systemImpedanceOpt=10;
     systemImpedanceGap=1;
-    adjustLEDPWM();
+    adjustLedPwm();
     systemRunMode=3;
   }
   if ( alternatorVoltageIn > alternatorVoltageBbu && alternatorVoltageIn < alternatorVoltageMax ){ // Optimum range
     systemImpedanceOpt=20;
     systemImpedanceGap=2;
-    adjustLEDPWM();
+    adjustLedPwm();
     systemRunMode=2;
   }
   if ( alternatorVoltageIn > alternatorVoltageMin && alternatorVoltageIn < alternatorVoltageBbu ){ // Within the BBU and charging
     systemImpedanceOpt=30;
     systemImpedanceGap=3;
-    adjustLEDPWM();
+    adjustLedPwm();
     systemRunMode=1;
   }
   if ( alternatorVoltageIn < alternatorVoltageMin ){ // Below min alternator output voltage
     systemImpedanceOpt=40;
     systemImpedanceGap=4;
-    adjustLEDPWM();
+    adjustLedPwm();
     systemRunMode=0;
   }
   
@@ -193,7 +193,7 @@ void loop() {
     Serial.print("RM ");
     Serial.print(systemRunMode);
     Serial.print("\tRS ");
-    Serial.print(systemImpedanceInit);
+    Serial.print(systemImpedanceGoal);
     Serial.print("\t1L ");
     Serial.print(led1PwmOut);
     Serial.print("\t2L ");
