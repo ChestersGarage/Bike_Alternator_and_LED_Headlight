@@ -7,10 +7,10 @@ Runs on an Arduino/ATMega328P 16MHz.
 UNFINISHED CODE
   
 * LED brightness based on alternator output power, in consideration of:
-  - Total system load, including uC and battery charging needs.
+  - System load on the alternator and backup battery, including uC and battery charging.
+  - Maximum alternator output voltage
   - Maximum battery drain current
   - LED temperature
-* Alternator cut-in/out at startup or over-output condition.
 * MPPT-like loading for maximum alternator output efficiency.
 * Alarm sound if any parameters are beyond critical thresholds:
   - Battery voltage too low.
