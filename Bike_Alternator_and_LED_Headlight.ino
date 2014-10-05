@@ -46,44 +46,58 @@ Adafruit_MCP4725 Led2;
 // A4
 // A5
 
-// Measured values
-float alternatorVoltageIn;   // Alternator output voltage (V)
-float alternatorCurrentIn;   // Alternator output current (mA)
-float batteryVoltageIn;      // Battery voltage (V)
-float batteryCurrentIn;      // Battery backup drain current (mA)
-int systemLedTemperatureIn;  // LED temperature (arbitrary)
-
-// Thresholds and limits
-float alternatorVoltageMax = 22.0;    // Increase LED brightness at or above this voltage
+// Alternator
+float alternatorVoltageIn;            // Alternator output voltage (V)
+float alternatorVoltageMax = 25.9;     // Absolute maximum safe alternator voltage
+float alternatorVoltageHi = 22.0;     // Increase LED brightness at or above this voltage
 float alternatorVoltageBbu = 15.0;    // Voltage at which LED power transitions between alternator and battery backup
 float alternatorVoltageMin = 5.0;     // Minimum alternator output voltage (V)
+float alternatorCurrentIn;            // Alternator output current (mA)
 float alternatorCurrentMax = 3000.0;  // Maximum alternator output current (mA)
-float batteryVoltageMin = 3.0;        // Minimum battery voltage (V)
-float batteryCurrentMax = 2000.0;     // Maximum battery backup drain current (mA)
+boolean altOverVolt = false;          // True if alternator voltage is too high
 
-// Calibration and calculated values
-int led1Level = 0;                 // PWM/DAC output value for LED1
-int led2Level = 0;                 // PWM/DAC output value for LED2
-int ledLevelMax = 4096;            // Maximum possible LED level
-int ledLevelHi = 3996;             // Maximum useful LED level, above which the LED does not get any brighter. (high dead zone)
-int ledLevelLo = 100;              // Minimum useful LED level, below which the LED is off (low dead zone).
-int ledLevelMin = 0;               // Minimum possible LED level
+// Battery
+float batteryVoltageIn;            // Battery voltage (V)
+float batteryVoltageMin = 3.0;     // Minimum battery voltage (V)
+float batteryCurrentIn;            // Battery backup drain current (mA)
+float batteryCurrentMax = 2000.0;  // Maximum battery backup drain current (mA)
+boolean battOverCurr = false;      // True if battery current is too high
+
+// LED Temperature
+int systemLedTemperatureIn;         // LED temperature ADC scale
+int systemLedTemperatureMax = 660;  // Maximum LED temperature
+int systemLedTemperatureHi = 650;   // High water mark LED temperature.  Decrease brightness to stay below
+boolean ledOverTemp = false;        // True if LED temperature is too high
+
+// LEDs and DACs
+// RCD-24 driver dimming range: 100%=0.13V - 0%=4.5V
+// DAC output range 0-4096, 5V VCC
+// Dimming is on an inverted scale: 4096=off, 0=max
+// Useful dimming range in terms of DAC: 106 - 3686
+int led1Level;                 // PWM/DAC output value for LED1
+long led2Level;                 // PWM/DAC output value for LED2
+int dacRange = 4096;               // Resolution of the LED dimming output
+long led2Offset = dacRange*75/100;
+int ledLevelHiDz = 106;            // Dead zone at the brightest LED level
+int ledLevelLoDz = 410;            // Dead zone at the lowest LED level
 int systemLedLevelOut = 0;         // System LED brightness level 
-int systemLedLevelMax = 7168;      // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
-int systemLedLevelMin = 440;       // Minimum LED1 brightness while system is powered on (roughly 75mA or 1W)
+long systemLedRange = dacRange*175/100;         // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
+byte ledLevelIncrement = 1;        // LED PWM output increment value
+
+// System load and impedance
 float systemImpedanceOpt = 34.0;   // Optimum impedance load on the alternator, in Ohms, calculated based on alternator output voltage
 float systemImpedanceGap = 3.0;    // Dead zone +/- systemImpedanceOpt value. Reduces flicker. 
 float systemImpedanceNow = 100.0;  // Start the calculated impedance at a safe value.
 float systemOverhead = 4.2;        // System idle power draw in Watts
+#ifdef DEBUG
 byte systemRunMode = 0;            // Used for debugging
-byte ledLevelIncrement = 1;        // LED PWM output increment value
-
+#endif
 //#define DEBUG
 
 void setup() {
-  #ifdef DEBUG
-    Serial.begin(115200);
-  #endif
+#ifdef DEBUG
+  Serial.begin(115200);
+#endif
   battVI.begin();
   altVI.begin();
   Led1.begin(0x63);
@@ -112,30 +126,35 @@ void readSensors(){
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
 }
 
-void determineRunParams(){
-  if ( alternatorVoltageIn > alternatorVoltageMax ){  // Above max alternator output voltage
+void calcImpedanceParams(){
+  systemImpedanceNow = (alternatorVoltageIn*alternatorVoltageIn)/((alternatorVoltageIn*alternatorCurrentIn)+(batteryVoltageIn*batteryCurrentIn));
+  if ( alternatorVoltageIn > alternatorVoltageHi ){  // Above max alternator output voltage
     systemImpedanceOpt=10;
     systemImpedanceGap=1;
-    systemImpedanceNow = alternatorVoltageIn/alternatorCurrentIn;
+#ifdef DEBUG
     systemRunMode=3;
+#endif
   }
-  if ( alternatorVoltageIn > alternatorVoltageBbu && alternatorVoltageIn < alternatorVoltageMax ){ // Optimum range
+  if ( alternatorVoltageIn > alternatorVoltageBbu && alternatorVoltageIn < alternatorVoltageHi ){ // Optimum range
     systemImpedanceOpt=20;
     systemImpedanceGap=2;
-    systemImpedanceNow = alternatorVoltageIn/alternatorCurrentIn;
+#ifdef DEBUG
     systemRunMode=2;
+#endif
   }
   if ( alternatorVoltageIn > alternatorVoltageMin && alternatorVoltageIn < alternatorVoltageBbu ){ // Within the BBU and charging
     systemImpedanceOpt=30;
     systemImpedanceGap=3;
-    systemImpedanceNow = (alternatorVoltageIn*alternatorVoltageIn)/((alternatorVoltageIn/alternatorCurrentIn)+(batteryVoltageIn/batteryCurrentIn));
+#ifdef DEBUG
     systemRunMode=1;
+#endif
   }
   if ( alternatorVoltageIn < alternatorVoltageMin ){ // Below min alternator output voltage
     systemImpedanceOpt=40;
     systemImpedanceGap=4;
-    systemImpedanceNow = batteryVoltageIn/batteryCurrentIn;
+#ifdef DEBUG
     systemRunMode=0;
+#endif
   }
 }
 
@@ -145,54 +164,83 @@ void adjustLedPwm(){
 }
 
 void setMainLeds(){
-  if ( systemLedLevelOut > systemLedLevelMax ){ systemLedLevelOut = systemLedLevelMax; }
-  if ( systemLedLevelOut < systemLedLevelMin ){ systemLedLevelOut = systemLedLevelMin; }
-  led1Level = systemLedLevelOut;
-  led2Level = systemLedLevelOut - (ledLevelMax/4*3);
-  if ( led1Level > ledLevelMax ){ led1Level = ledLevelMax; }
-  if ( led2Level < ledLevelMin ){ led2Level = ledLevelMin; }
-  Led1.setVoltage(led1Level, false);
-  Led2.setVoltage(led2Level, false);
+  if ( systemLedLevelOut >= dacRange-ledLevelHiDz ){    // If we're above LED1 HDZ
+    led1Level = dacRange;                               // The set LED1 to max
+  } else {
+    led1Level = systemLedLevelOut;                      // Otherwise set LED1 to value
+  }
+  if ( systemLedLevelOut <= led2Offset+ledLevelLoDz ){  // If we're below LED2 LDZ
+    led2Level = 1;                                      // Then set LED2 to off
+  } else {
+    led2Level = systemLedLevelOut-led2Offset;           // Otherwise set LED2 to value
+  }
+  Led1.setVoltage(dacRange-led1Level, false);
+  Led2.setVoltage(dacRange-led2Level, false);
 }
 
 void increaseLedLevel(){
-  if ( systemLedLevelOut <= systemLedLevelMax ){
-    systemLedLevelOut = systemLedLevelOut + ledLevelIncrement;
+  if ( systemLedLevelOut >= systemLedRange-ledLevelHiDz ){      // If we're above the global HDZ
+    systemLedLevelOut = systemLedRange;                         // Then set output to maximum
+  } else {
+    systemLedLevelOut = systemLedLevelOut + ledLevelIncrement;  // Otherwise increase the output level
   }
   setMainLeds();
 }
 
 void decreaseLedLevel(){ 
-  if ( systemLedLevelOut >= systemLedLevelMin ){
-    systemLedLevelOut = systemLedLevelOut - ledLevelIncrement; 
+  if ( systemLedLevelOut <= ledLevelLoDz ){                     // If we're below the global LDZ
+    systemLedLevelOut = 1;                                      // Then set output to minimum
+  } else {
+    systemLedLevelOut = systemLedLevelOut - ledLevelIncrement;  // Otherwise decrease the output level
   }
   setMainLeds();
 }
 
 void checkBattOverCurrent(){
-  while ( batteryCurrentIn >= batteryCurrentMax ){
+  if ( batteryCurrentIn >= batteryCurrentMax ){
     decreaseLedLevel();
-    readSensors();
+    battOverCurr = true;
+  } else {
+    battOverCurr = false;
   }
 }
 
 void checkAltOverVoltage(){
-  while ( alternatorVoltageIn >= alternatorVoltageMax ){
+  if ( alternatorVoltageIn >= alternatorVoltageMax ){
     increaseLedLevel();
-    readSensors();
+    altOverVolt = true;
+  } else {
+    altOverVolt = false;
   }
 }
 
 void checkLedOverTemp(){
-  
+  if ( systemLedTemperatureIn >= systemLedTemperatureMax ){
+    decreaseLedLevel();
+    ledOverTemp = true;
+  } else if ( systemLedTemperatureIn >= systemLedTemperatureHi ){
+    decreaseLedLevel();
+    ledOverTemp = false;
+  } else {
+    ledOverTemp = false;
+  }
+}
+
+void checkAlarm(){
+  if ( battOverCurr || altOverVolt || ledOverTemp ){
+    digitalWrite(alarmPin, HIGH);
+  } else {
+    digitalWrite(alarmPin, LOW);
+  }
 }
 
 void loop(){
   readSensors();
-  checkBattOverCurrent();
   checkAltOverVoltage();
+  checkBattOverCurrent();
   checkLedOverTemp();
-  determineRunParams();
+  checkAlarm();
+  calcImpedanceParams();
   adjustLedPwm();
 #ifdef DEBUG
   updateSerial();
