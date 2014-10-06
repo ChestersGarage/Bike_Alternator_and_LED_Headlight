@@ -43,7 +43,7 @@ Adafruit_MCP4725 Led2;
 // charging 13
 
 #define ledTemperaturePin A0
-// A1
+#define bbuVoltagePin A1
 // A2
 // A3
 // A4
@@ -64,8 +64,8 @@ float batteryVoltageIn;            // Battery voltage (V)
 float batteryVoltageMin = 3.0;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
 float batteryCurrentIn;            // Battery backup drain current (mA)
 float batteryCurrentMax = 2000.0;  // Above this value (mA), the LED brightness is decreased and the alarm is sounded
-float batteryVoltageBbu = 15.0;
-float batteryImpedanceIn;
+float batteryVoltageBoost;         // Battery voltage is boosted to 15V before being used for anything. (measured)
+float batteryImpedanceBbu;         // Calculated impedance on the battery backup, based on the boost voltage.
 boolean battOverCurr = false;      // True if battery current is too high
 boolean battUnderVolt = false;     // True if battery voltage too low
 
@@ -133,6 +133,7 @@ void readSensors(){
   batteryVoltageIn = battVI.getBusVoltage_V();
   batteryCurrentIn = battVI.getCurrent_mA();
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
+  batteryVoltageBoost = analogRead(bbuVoltagePin);
 }
 
 // Manipulate the LED overall brightness level, based on impedance and threshold violations
@@ -145,11 +146,11 @@ void adjustSystemLedLevel(){
   } 
   else {
     // System impedance value is calculated from the combination of alternator power and battery power consumption.
-    // This means the calculation NEVER actually determines the real impedance against the alternator.
-    // But it's within a valid range and more suitable for determining LED brightness.
+    // Alternator impedance is straight forward
     alternatorImpedanceIn = alternatorVoltageIn/alternatorCurrentIn;
-    batteryImpedanceIn = (batteryVoltageBbu*batteryVoltageBbu)/(batteryVoltageIn*batteryCurrentIn);
-    systemImpedanceTotal = (alternatorImpedanceIn * batteryImpedanceIn) / (alternatorImpedanceIn + batteryImpedanceIn);
+    // Battery impedance has to be converted based on the boost regulator voltage
+    batteryImpedanceBbu = (batteryVoltageBoost*batteryVoltageBoost)/(batteryVoltageIn*batteryCurrentIn);
+    systemImpedanceTotal = (alternatorImpedanceIn * batteryImpedanceBbu) / (alternatorImpedanceIn + batteryImpedanceBbu);
     // This creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
     // And the allowable deviation from optimum is +0 to -10%
