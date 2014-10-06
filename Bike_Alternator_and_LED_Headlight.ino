@@ -136,30 +136,40 @@ void readSensors(){
   batteryVoltageBoost = analogRead(bbuVoltagePin);
 }
 
-// Manipulate the LED overall brightness level, based on impedance and threshold violations
+// Manipulate the LED brightness level, based on impedance and threshold violations
 void adjustSystemLedLevel(){
+  // Fatal threshold violations cause a total shutdown
   if ( battUnderVolt || ledOverTemp ){
     forceLedLevelOff();
   }
+  // Critical threshold violations push the brightness to minimum
   else if ( alternatorVoltageIn <= alternatorVoltageMin ){
     setLedLevelMinimum();
-  } 
+  }
+   // Non-critical threshold violations trigger a decrease in brightness
+  else if ( altOverCurr || battOverCurr || ledHighTemp ){
+    decreaseLedLevel();
+  }
   else {
-    // System impedance value is calculated from the combination of alternator power and battery power consumption.
     // Alternator impedance is straight forward
-    alternatorImpedanceIn = alternatorVoltageIn/alternatorCurrentIn;
+    alternatorImpedanceIn = alternatorVoltageIn / alternatorCurrentIn;
     // Battery impedance has to be converted based on the boost regulator voltage
-    batteryImpedanceBbu = (batteryVoltageBoost*batteryVoltageBoost)/(batteryVoltageIn*batteryCurrentIn);
+    batteryImpedanceBbu = (batteryVoltageBoost * batteryVoltageBoost) / (batteryVoltageIn * batteryCurrentIn);
+    // Total system impedance is calculated like two parallel resistors
     systemImpedanceTotal = (alternatorImpedanceIn * batteryImpedanceBbu) / (alternatorImpedanceIn + batteryImpedanceBbu);
-    // This creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
+    // Creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
     // And the allowable deviation from optimum is +0 to -10%
     systemImpedanceGap = systemImpedanceOpt / 10;
-    if ( systemImpedanceTotal <= (systemImpedanceOpt - systemImpedanceGap) || altOverCurr || battOverCurr || ledHighTemp ){
+    // Otherwise act based on impedance
+    if ( systemImpedanceTotal <= systemImpedanceOpt - systemImpedanceGap ){
       decreaseLedLevel();
     }
     else if ( systemImpedanceTotal >= systemImpedanceOpt || altOverVolt ){
       increaseLedLevel();
+    }
+    else {
+      // Do nothing
     }
   }
 }
