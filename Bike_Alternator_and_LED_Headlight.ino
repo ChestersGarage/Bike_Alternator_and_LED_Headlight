@@ -86,7 +86,7 @@ int ledLevelHiDz = 106;                  // Dead zone at the brightest LED level
 int ledLevelLoDz = 410;                  // Dead zone at the lowest LED level
 int systemLedLevelOut = 0;               // System LED brightness level 
 long systemLedRange = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
-byte ledLevelIncrement = 1;              // LED PWM output increment value
+byte ledLevelIncrement = 1;              // LED output increment value
 
 // System impedance
 float systemImpedanceOpt;         // The calculated optimum system impedance, in Ohms.
@@ -118,6 +118,7 @@ void setup() {
   Led2.setVoltage(4095, true);
 }
 
+// Read all sensor values in a single pass
 void readSensors(){
   alternatorVoltageIn  = altVI.getBusVoltage_V();
   alternatorCurrentIn  = altVI.getCurrent_mA();
@@ -126,7 +127,7 @@ void readSensors(){
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
 }
 
-// Manipulate the LED overall brightness level
+// Manipulate the LED overall brightness level, based on impedance
 void adjustSystemLedLevel(){
   if ( battUnderVolt || ledOverTemp ){
     forceLedLevelOff();
@@ -135,11 +136,13 @@ void adjustSystemLedLevel(){
     setLedLevelMinimum();
   } 
   else {
-    // Global impedance value is calculated from the combination of alternator power and battery power consumption.
+    // System impedance value is calculated from the combination of alternator power and battery power consumption.
     // This means the calculation NEVER actually determines the real impedance against the alternator.
     // But it's within a valid range and more suitable for determining LED brightness.
     systemImpedanceNow = (alternatorVoltageIn * alternatorVoltageIn) / ((alternatorVoltageIn * alternatorCurrentIn) + (batteryVoltageIn * batteryCurrentIn));
+    // This creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
+    // And the allowable deviation from optimum is +0 to -10%
     systemImpedanceGap = systemImpedanceOpt / 10;
     if ( systemImpedanceNow <= (systemImpedanceOpt - systemImpedanceGap) || altOverCurr || battOverCurr || ledHighTemp ){
       decreaseLedLevel();
@@ -152,7 +155,7 @@ void adjustSystemLedLevel(){
 
 // Apply the overall brightness level to the LEDs
 void increaseLedLevel(){
-  if ( systemLedLevelOut >= systemLedRange - ledLevelHiDz ){      // If we're above the global HDZ
+  if ( systemLedLevelOut >= systemLedRange - ledLevelHiDz ){    // If we're above the global HDZ
     systemLedLevelOut = systemLedRange;                         // Then set output to maximum
   } else {
     systemLedLevelOut = systemLedLevelOut + ledLevelIncrement;  // Otherwise increase the output level
@@ -162,7 +165,7 @@ void increaseLedLevel(){
 
 void decreaseLedLevel(){ 
   if ( systemLedLevelOut <= ledLevelLoDz ){                     // If we're below the global LDZ
-    systemLedLevelOut = ledLevelLoDz;                                      // Then set output to minimum
+    systemLedLevelOut = ledLevelLoDz;                           // Then set output to minimum
   } else {
     systemLedLevelOut = systemLedLevelOut - ledLevelIncrement;  // Otherwise decrease the output level
   }
@@ -196,7 +199,7 @@ void setMainLeds(){
 
 // Threshold violations
 void checkBattOverCurrent(){
-  if ( batteryCurrentIn >= batteryCurrentMax ){
+  if ( batteryCurrentIn > batteryCurrentMax ){
     battOverCurr = true;
   } else {
     battOverCurr = false;
@@ -204,7 +207,7 @@ void checkBattOverCurrent(){
 }
 
 void checkBattUnderVoltage(){
-  if ( batteryVoltageIn >= batteryVoltageMin ){
+  if ( batteryVoltageIn < batteryVoltageMin ){
     battUnderVolt = true;
   } else {
     battUnderVolt = false;
@@ -230,11 +233,13 @@ void checkAltOverCurrent(){
 void checkLedOverTemp(){
   if ( systemLedTemperatureIn >= systemLedTemperatureMax ){
     ledOverTemp = true;
+    ledHighTemp = false;
   } else if ( systemLedTemperatureIn >= systemLedTemperatureHi ){
+    ledOverTemp = false;
     ledHighTemp = true;
   } else {
-    ledHighTemp = false;
     ledOverTemp = false;
+    ledHighTemp = false;
   }
 }
 
