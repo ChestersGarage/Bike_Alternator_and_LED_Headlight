@@ -78,21 +78,26 @@ boolean ledHighTemp = false;        // True if LED temperature is too high
 // DAC output range 0-4095, 5V VCC
 // Dimming is on an inverted scale: 4095=off, 0=max
 // Useful dimming range in terms of DAC: 106 - 3686
-int dacRange = 4096;                     // Resolution of the LED dimming output
-int led1Level;                           // Output value for LED1
+long dacRange = 4096;                     // Resolution of the LED dimming output
+long led1Level;                           // Output value for LED1
 long led2Level;                          // Output value for LED2
 long led2Offset = dacRange*75/100;       // LED2 starts to turn on after about 75% brightness on LED1
-int ledLevelHiDz = 106;                  // Dead zone at the brightest LED level
-int ledLevelLoDz = 410;                  // Dead zone at the lowest LED level
-int systemLedLevelOut = 0;               // System LED brightness level 
+long ledLevelHiDz = 106;                  // Dead zone at the brightest LED level
+long ledLevelLoDz = 1150;                  // Dead zone at the lowest LED level
+long systemLedLevelOut = ledLevelLoDz;    // System LED brightness level 
 long systemLedRange = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
-byte ledLevelIncrement = 1;              // LED output increment value
+long ledLevelIncrement = 1;              // LED output increment value
 
 // System impedance
 float systemImpedanceOpt;         // The calculated optimum system impedance, in Ohms.
 float systemImpedanceGap;         // systemImpedanceNow allowed to be this much less than systemImpedanceOpt. Reduces flicker.
 float systemImpedanceNow;         // The calculated current system impedance.
 float systemImpedanceRef = 33.0;  // LED brightness adjusted per "systemImpedanceOpt = systemImpedanceRef-(0.5*(alternatorVoltageIn-alternatorVoltageMin))"
+
+#ifdef DEBUG
+int displayUpdateInterval = 250;
+long displayUpdateTime = 0;
+#endif
 
 void setup() {
 #ifdef DEBUG
@@ -127,7 +132,7 @@ void readSensors(){
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
 }
 
-// Manipulate the LED overall brightness level, based on impedance
+// Manipulate the LED overall brightness level, based on impedance and threshold violations
 void adjustSystemLedLevel(){
   if ( battUnderVolt || ledOverTemp ){
     forceLedLevelOff();
@@ -139,7 +144,7 @@ void adjustSystemLedLevel(){
     // System impedance value is calculated from the combination of alternator power and battery power consumption.
     // This means the calculation NEVER actually determines the real impedance against the alternator.
     // But it's within a valid range and more suitable for determining LED brightness.
-    systemImpedanceNow = (alternatorVoltageIn * alternatorVoltageIn) / ((alternatorVoltageIn * alternatorCurrentIn) + (batteryVoltageIn * batteryCurrentIn));
+    systemImpedanceNow = (alternatorVoltageIn * alternatorVoltageIn) / ((alternatorVoltageIn * (alternatorCurrentIn/1000)) + (batteryVoltageIn * (batteryCurrentIn/1000)));
     // This creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
     // And the allowable deviation from optimum is +0 to -10%
@@ -265,6 +270,8 @@ void setIndicatorLed(){
 
 // The main loop
 void loop(){
+  digitalWrite(led1EnablePin, LOW);
+  digitalWrite(led2EnablePin, LOW);
   readSensors();
   checkAltOverVoltage();
   checkBattOverCurrent();
@@ -282,15 +289,15 @@ void loop(){
 // Debug output to serial
 #ifdef DEBUG
 void updateSerial(){
-  Serial.print("Impedance:    "); Serial.println(systemImpedanceNow);
-  Serial.print("LED1:         "); Serial.println(led1Level);
-  Serial.print("LED2:         "); Serial.println(led2Level);
-  Serial.print("Alt Voltage:  "); Serial.print(alternatorVoltageIn); Serial.println("\tV");
-  Serial.print("Alt Current:  "); Serial.print(alternatorCurrentIn); Serial.println("\tmA");
-  Serial.print("Batt Voltage: "); Serial.print(batteryVoltageIn); Serial.println("\tV");
-  Serial.print("Batt Current: "); Serial.print(batteryCurrentIn); Serial.println("\tmA");
-  Serial.print("LED Temp:     "); Serial.println(systemLedTemperatureIn);
-  Serial.println();
+  if ( millis() >= displayUpdateTime + displayUpdateInterval ){
+    displayUpdateTime = millis();
+    Serial.print("Now:  "); Serial.print(systemImpedanceNow); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
+    Serial.print("LED1: "); Serial.print(dacRange-led1Level); Serial.print("\tLED2:         "); Serial.println(dacRange-led2Level);
+    Serial.print("AltV: "); Serial.print(alternatorVoltageIn); Serial.print(" V"); Serial.print("\tAltC: "); Serial.print(alternatorCurrentIn); Serial.println(" mA");
+    Serial.print("BatV: "); Serial.print(batteryVoltageIn); Serial.print(" V"); Serial.print("\tBatC: "); Serial.print(batteryCurrentIn); Serial.println(" mA");
+    Serial.print("LEDT: "); Serial.println(systemLedTemperatureIn);
+    Serial.println();
+  }
 }
 #endif
 
