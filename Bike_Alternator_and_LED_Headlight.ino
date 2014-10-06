@@ -151,11 +151,11 @@ void adjustSystemLedLevel(){
     decreaseLedLevel();
   }
   else {
-    // Alternator impedance is straight forward
+    // Alternator impedance is straight forward R=E/I
     alternatorImpedanceIn = alternatorVoltageIn / alternatorCurrentIn;
-    // Battery impedance has to be converted based on the boost regulator voltage
+    // Battery impedance has to be converted based on the boost regulator voltage R=(ExE)/P
     batteryImpedanceBbu = (batteryVoltageBoost * batteryVoltageBoost) / (batteryVoltageIn * batteryCurrentIn);
-    // Total system impedance is calculated like two parallel resistors
+    // Total system impedance is calculated like two parallel resistors RT=(R1xR2)/(R1+R2)
     systemImpedanceTotal = (alternatorImpedanceIn * batteryImpedanceBbu) / (alternatorImpedanceIn + batteryImpedanceBbu);
     // Creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
