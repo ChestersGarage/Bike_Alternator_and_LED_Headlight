@@ -55,6 +55,7 @@ float alternatorVoltageMax = 25.5;    // Above this value (V), the LEDs are forc
 float alternatorVoltageMin = 6.5;     // Below this value (V), the LEDs are forced to minimum brightness
 float alternatorCurrentIn;            // Alternator output current (mA)
 float alternatorCurrentMax = 3000.0;  // Maximum alternator output current (mA)
+float alternatorImpedanceIn;
 boolean altOverVolt = false;          // True if alternator voltage is too high
 boolean altOverCurr = false;          // True if alternator current is too high
 
@@ -63,6 +64,8 @@ float batteryVoltageIn;            // Battery voltage (V)
 float batteryVoltageMin = 3.0;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
 float batteryCurrentIn;            // Battery backup drain current (mA)
 float batteryCurrentMax = 2000.0;  // Above this value (mA), the LED brightness is decreased and the alarm is sounded
+float batteryVoltageBbu = 15.0;
+float batteryImpedanceIn;
 boolean battOverCurr = false;      // True if battery current is too high
 boolean battUnderVolt = false;     // True if battery voltage too low
 
@@ -90,8 +93,8 @@ long ledLevelIncrement = 1;              // LED output increment value
 
 // System impedance
 float systemImpedanceOpt;         // The calculated optimum system impedance, in Ohms.
-float systemImpedanceGap;         // systemImpedanceNow allowed to be this much less than systemImpedanceOpt. Reduces flicker.
-float systemImpedanceNow;         // The calculated current system impedance.
+float systemImpedanceGap;         // systemImpedanceTotal allowed to be this much less than systemImpedanceOpt. Reduces flicker.
+float systemImpedanceTotal;       // The calculated total system impedance.
 float systemImpedanceRef = 33.0;  // LED brightness adjusted per "systemImpedanceOpt = systemImpedanceRef-(0.5*(alternatorVoltageIn-alternatorVoltageMin))"
 
 #ifdef DEBUG
@@ -144,15 +147,17 @@ void adjustSystemLedLevel(){
     // System impedance value is calculated from the combination of alternator power and battery power consumption.
     // This means the calculation NEVER actually determines the real impedance against the alternator.
     // But it's within a valid range and more suitable for determining LED brightness.
-    systemImpedanceNow = (alternatorVoltageIn * alternatorVoltageIn) / ((alternatorVoltageIn * (alternatorCurrentIn/1000)) + (batteryVoltageIn * (batteryCurrentIn/1000)));
+    alternatorImpedanceIn = alternatorVoltageIn/alternatorCurrentIn;
+    batteryImpedanceIn = (batteryVoltageBbu*batteryVoltageBbu)/(batteryVoltageIn*batteryCurrentIn);
+    systemImpedanceTotal = (alternatorImpedanceIn * batteryImpedanceIn) / (alternatorImpedanceIn + batteryImpedanceIn);
     // This creates an impedance curve that reduces the optimum impedance as the alternator voltage increases.
     systemImpedanceOpt = systemImpedanceRef - (0.5 * (alternatorVoltageIn - alternatorVoltageMin));
     // And the allowable deviation from optimum is +0 to -10%
     systemImpedanceGap = systemImpedanceOpt / 10;
-    if ( systemImpedanceNow <= (systemImpedanceOpt - systemImpedanceGap) || altOverCurr || battOverCurr || ledHighTemp ){
+    if ( systemImpedanceTotal <= (systemImpedanceOpt - systemImpedanceGap) || altOverCurr || battOverCurr || ledHighTemp ){
       decreaseLedLevel();
     }
-    else if ( systemImpedanceNow >= systemImpedanceOpt || altOverVolt ){
+    else if ( systemImpedanceTotal >= systemImpedanceOpt || altOverVolt ){
       increaseLedLevel();
     }
   }
@@ -291,7 +296,7 @@ void loop(){
 void updateSerial(){
   if ( millis() >= displayUpdateTime + displayUpdateInterval ){
     displayUpdateTime = millis();
-    Serial.print("Now:  "); Serial.print(systemImpedanceNow); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
+    Serial.print("Now:  "); Serial.print(systemImpedanceTotal); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
     Serial.print("LED1: "); Serial.print(dacRange-led1Level); Serial.print("\tLED2:         "); Serial.println(dacRange-led2Level);
     Serial.print("AltV: "); Serial.print(alternatorVoltageIn); Serial.print(" V"); Serial.print("\tAltC: "); Serial.print(alternatorCurrentIn); Serial.println(" mA");
     Serial.print("BatV: "); Serial.print(batteryVoltageIn); Serial.print(" V"); Serial.print("\tBatC: "); Serial.print(batteryCurrentIn); Serial.println(" mA");
