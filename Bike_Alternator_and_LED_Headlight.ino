@@ -75,8 +75,8 @@ boolean ledHighTemp = false;        // True if LED temperature is too high
 
 // Main LEDs and DACs
 // RCD-24 driver dimming range: 100%=0.13V - 0%=4.5V
-// DAC output range 0-4096, 5V VCC
-// Dimming is on an inverted scale: 4096=off, 0=max
+// DAC output range 0-4095, 5V VCC
+// Dimming is on an inverted scale: 4095=off, 0=max
 // Useful dimming range in terms of DAC: 106 - 3686
 int dacRange = 4096;                     // Resolution of the LED dimming output
 int led1Level;                           // Output value for LED1
