@@ -39,11 +39,11 @@ Adafruit_MCP4725 Led2;
 // 9
 // 10
 // 11
-// chg_err 12
-// charging 13
+#define chargePin 12
+#define chargeDonePin 13
 
 #define ledTemperaturePin A0
-#define bbuVoltagePin A1
+#define boostVoltagePin A1
 // A2
 // A3
 // A4
@@ -52,61 +52,56 @@ Adafruit_MCP4725 Led2;
 // Alternator
 float alternatorVoltageIn;            // Alternator output voltage (V)
 float alternatorVoltageMax = 25.5;    // Above this value (V), the LEDs are forced to maximum brightness and the alarm is sounded
-float alternatorVoltageMin = 6.5;     // Below this value (V), the LEDs are forced to minimum brightness
+float alternatorVoltageMin = 5.5;     // Below this value (V), the LEDs are forced to minimum brightness
 float alternatorCurrentIn;            // Alternator output current (mA)
 float alternatorCurrentMax = 3000.0;  // Maximum alternator output current (mA)
-float alternatorPowerIn;
-boolean altOverVolt = false;          // True if alternator voltage is too high
-boolean altOverCurr = false;          // True if alternator current is too high
+//float alternatorPowerIn;
 
 // Battery
 float batteryVoltageIn;            // Battery voltage (V)
-float batteryVoltageMin = 3.0;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
+float batteryVoltageMin = 3.5;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
 float batteryCurrentIn;            // Battery backup drain current (mA)
-float batteryCurrentMax = 2000.0;  // Above this value (mA), the LED brightness is decreased and the alarm is sounded
-float batteryCurrentOpr = 500.0;
-float batteryCurrentOprDz = 50.0;
-float batteryVoltageBoost;         // Battery voltage is boosted to 15V before being used for anything. (measured)
-float batteryPowerIn;         // Calculated impedance on the battery backup, based on the boost voltage.
-boolean battOverCurr = false;      // True if battery current is too high
-boolean battUnderVolt = false;     // True if battery voltage too low
+float batteryCurrentMax = 1500.0;  // Above this value (mA), the LED brightness is decreased and the alarm is sounded
+//float batteryCurrentOpr = 500.0;  // An ideal level of batterty current (noted FYI)
+boolean batteryChargeGood;
+boolean batteryChargeDone;
+float boostVoltageIn;         // Battery voltage is boosted to 15V before being used for anything. (measured)
 
 // LED Temperature
 int systemLedTemperatureIn;         // LED temperature ADC scale
 int systemLedTemperatureMax = 660;  // Maximum safe LED temperature
 int systemLedTemperatureHi = 650;   // High water mark LED temperature.  Decrease brightness to stay below
-boolean ledOverTemp = false;        // True if LED temperature is beyond safe level
-boolean ledHighTemp = false;        // True if LED temperature is too high
 
 // Main LEDs and DACs
 // RCD-24 driver dimming range: 100%=0.13V - 0%=4.5V
 // DAC output range 0-4095, 5V VCC
 // Dimming is on an inverted scale: 4095=off, 0=max
 // Useful dimming range in terms of DAC: 106 - 3686
-long dacRange = 4096;                     // Resolution of the LED dimming output
-long led1Level;                           // Output value for LED1
-long led2Level;                          // Output value for LED2
-long led2Offset = dacRange*75/100;       // LED2 starts to turn on after about 75% brightness on LED1
-//long ledLevelHiDz = 106;                  // Dead zone at the brightest LED level
-long ledLevelMin = 1150;                  // Dead zone at the lowest LED level
-long systemLedLevelOut = ledLevelMin;    // System LED brightness level 
-long systemLedRange = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
-long ledLevelIncrement = 20;              // LED output increment value
-long ledLevelIncrementEmergency = 333;
+long dacRange = 4096;                       // Resolution of the LED dimming output
+long led1Level;                             // Output value for LED1
+long led2Level;                             // Output value for LED2
+long led2Offset = dacRange*75/100;          // LED2 starts to turn on after about 75% brightness on LED1
+long systemLedLevelMin = 1150;              // Dead zone at the lowest LED level
+long systemLedLevelOut = systemLedLevelMin; // System LED brightness level 
+long systemLedLevelMax = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
+long ledLevelIncrementNormal = 100;          // LED output increment value
 
-/*
 // System impedance
-float systemImpedanceOpt;         // The calculated optimum system impedance, in Ohms.
-float systemImpedanceGap;         // systemPowerTotal allowed to be this much less than systemImpedanceOpt. Reduces flicker.
-float systemPowerTotal;       // The calculated total system impedance.
-float systemImpedanceRef = 33.0;  // LED brightness adjusted per "systemImpedanceOpt = systemImpedanceRef-(0.5*(alternatorVoltageIn-alternatorVoltageMin))"
-float systemImpedanceLo = 10.0;
-float systemImpedanceHi = 50.0;
-*/
-#ifdef DEBUG
+float systemImpedanceOpt;           // The calculated optimum system impedance, in Ohms.
+float systemImpedanceGap = 4;       // systemImpedanceTotal allowed to be this much less than systemImpedanceOpt. Reduces flicker.
+float systemImpedanceTotal;         // The calculated total system impedance.
+// LED brightness adjusted per "systemImpedanceOpt = systemImpedanceHi-(3*(alternatorVoltageIn-alternatorVoltageMin));"
+//float systemImpedanceRef = 33.0;  // Based on offline device testing, this is a point that has to be met along the calculated impedance curve (at 14V output)
+//float systemImpedanceLo = 12.0;   // Target lowest desireable impedance, based on offline device testing
+#define systemImpedanceHi 50.0   // Target highest desireable impedance, based on offline device testing
+byte errorLevel = 0;
+byte powerStatus = 0;
 int displayUpdateInterval = 100;
 long displayUpdateTime = 0;
-#endif
+
+long indicatorBlinkInterval = 250;  
+long indicatorBlinkTime = 0;
+boolean indicatorBlinkState = HIGH;
 
 void setup() {
 #ifdef DEBUG
@@ -122,14 +117,16 @@ void setup() {
   pinMode(indicatorBluePin, OUTPUT);
   pinMode(led1EnablePin, OUTPUT);
   pinMode(led2EnablePin, OUTPUT);
-  pinMode(bbuVoltagePin, INPUT);
+  pinMode(boostVoltagePin, INPUT);
   pinMode(ledTemperaturePin, INPUT);
+  pinMode(chargePin, INPUT);
+  pinMode(chargeDonePin, INPUT);
   digitalWrite(alarmPin, LOW);
   digitalWrite(indicatorRedPin, LOW);
   digitalWrite(indicatorGreenPin, LOW);
   digitalWrite(indicatorBluePin, LOW);
-  digitalWrite(led1EnablePin, HIGH);
-  digitalWrite(led2EnablePin, HIGH);
+  digitalWrite(led1EnablePin, LOW);
+  digitalWrite(led2EnablePin, LOW);
   Led1.setVoltage(4095, true);
   Led2.setVoltage(4095, true);
 }
@@ -138,196 +135,222 @@ void setup() {
 void readSensors(){
   alternatorVoltageIn  = altVI.getBusVoltage_V();
   alternatorCurrentIn  = altVI.getCurrent_mA();
-  batteryVoltageIn = battVI.getBusVoltage_V();
-  batteryCurrentIn = battVI.getCurrent_mA();
+  batteryVoltageIn =    battVI.getBusVoltage_V();
+  batteryCurrentIn =    battVI.getCurrent_mA();
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
-  batteryVoltageBoost = analogRead(bbuVoltagePin)*0.004882813/12*45;
+  boostVoltageIn = analogRead(boostVoltagePin)*0.004882813/12.0*45.0;
   // dac:819.2=4v 0.004882813V/div Vbbu/45*12=4 1024/5*4 33K and 12K 
-}
-
-// Manipulate the LED brightness level, based on battery current and threshold violations
-void adjustSystemLedLevel(){
-  // Fatal threshold violations cause a total shutdown
-  if ( battUnderVolt || ledOverTemp ){
-    forceLedLevelOff();
-  }
-  else if ( altOverCurr || battOverCurr || ledHighTemp ){
-    decreaseLedLevelEmergency();
-  }
-  else if ( altOverVolt ){
-    increaseLedLevelEmergency();
-  }
-  else {
-    if ( batteryCurrentIn >= (batteryCurrentOpr + batteryCurrentOprDz) ){
-      decreaseLedLevel();
-    }
-    else if ( batteryCurrentIn <= (batteryCurrentOpr - batteryCurrentOprDz) ){
-      increaseLedLevel();
-    }
-    else {
-      // Do nothing
-    }
-  }
-}
-
-// Apply the overall brightness level to the LEDs
-void increaseLedLevel(){
-  if ( systemLedLevelOut >= systemLedRange ){    // If we're above the global HDZ
-    systemLedLevelOut = systemLedRange;                         // Then set output to maximum
-  } else {
-    systemLedLevelOut = systemLedLevelOut + ledLevelIncrement;  // Otherwise increase the output level
-  }
-  setMainLeds();
-}
-
-void decreaseLedLevel(){ 
-  if ( systemLedLevelOut <= 1 ){                     // If we're below the global LDZ
-    systemLedLevelOut = 1;                           // Then set output to minimum
-  } else {
-    systemLedLevelOut = systemLedLevelOut - ledLevelIncrement;  // Otherwise decrease the output level
-  }
-  setMainLeds();
-}
-
-void decreaseLedLevelEmergency(){
-  if ( systemLedLevelOut <= 1 ){                     // If we're below the global LDZ
-    systemLedLevelOut = 1;                           // Then set output to minimum
-  } else {
-    systemLedLevelOut = systemLedLevelOut - ledLevelIncrementEmergency;  // Otherwise decrease the output level
-  }
-  setMainLeds();
-}
-
-void increaseLedLevelEmergency(){
-  if ( systemLedLevelOut >= systemLedRange ){    // If we're above the global HDZ
-    systemLedLevelOut = systemLedRange;                         // Then set output to maximum
-  } else {
-    systemLedLevelOut = systemLedLevelOut + ledLevelIncrementEmergency;  // Otherwise increase the output level
-  }
-  setMainLeds();
-}
-
-void setLedLevelMinimum(){
-  systemLedLevelOut = ledLevelMin;
-  setMainLeds();
-}
-
-void forceLedLevelOff(){
-  systemLedLevelOut = 1;
-  setMainLeds();
-}
-
-void setMainLeds(){
-  if ( systemLedLevelOut >= dacRange ){    // If we're above LED1 HDZ
-    led1Level = dacRange;                               // The set LED1 to max
-  } else {
-    led1Level = systemLedLevelOut;                      // Otherwise set LED1 to value
-  }
-  if ( systemLedLevelOut <= led2Offset ){  // If we're below LED2 LDZ
-    led2Level = 1;                                      // Then set LED2 to off
-  } else {
-    led2Level = systemLedLevelOut-led2Offset;           // Otherwise set LED2 to value
-  }
-  Led1.setVoltage(dacRange - led1Level, false);
-  Led2.setVoltage(dacRange - led2Level, false);
+  batteryChargeGood = digitalRead(chargePin);
+  batteryChargeDone = digitalRead(chargeDonePin);
 }
 
 // Threshold violations
-void checkBattOverCurrent(){
-  if ( batteryCurrentIn > batteryCurrentMax ){
-    battOverCurr = true;
-  } else {
-    battOverCurr = false;
-  }
-}
-
-void checkBattUnderVoltage(){
-  if ( batteryVoltageIn < batteryVoltageMin ){
-    battUnderVolt = true;
-  } else {
-    battUnderVolt = false;
-  }
-}
-
-void checkAltOverVoltage(){
-  if ( alternatorVoltageIn >= alternatorVoltageMax ){
-    altOverVolt = true;
-  } else {
-    altOverVolt = false;
-  }
-}
-
-void checkAltOverCurrent(){
-  if ( alternatorCurrentIn >= alternatorCurrentMax ){
-    altOverCurr = true;
-  } else {
-    altOverCurr = false;
-  }
-}
-
-void checkLedOverTemp(){
-  if ( systemLedTemperatureIn >= systemLedTemperatureMax ){
-    ledOverTemp = true;
-    ledHighTemp = false;
-  } else if ( systemLedTemperatureIn >= systemLedTemperatureHi ){
-    ledOverTemp = false;
-    ledHighTemp = true;
-  } else {
-    ledOverTemp = false;
-    ledHighTemp = false;
-  }
+void checkThresholds(){
+  // Error level
+  //  0 - OK
+  //  1 - Warning, minimum brightness
+  //  2 - Error, shutdown
+  if ( batteryCurrentIn >= batteryCurrentMax )             errorLevel = 1;
+  if ( alternatorCurrentIn >= alternatorCurrentMax )       errorLevel = 1;
+  if ( alternatorVoltageIn >= alternatorVoltageMax )       errorLevel = 1;
+  if ( systemLedTemperatureIn >= systemLedTemperatureHi )  errorLevel = 1;
+  if ( systemLedTemperatureIn >= systemLedTemperatureMax ) errorLevel = 2;
+  if ( batteryVoltageIn <= batteryVoltageMin )             errorLevel = 2;
 }
 
 // The audible alarm
-void checkAlarm(){
-  if ( altOverVolt || altOverCurr || battOverCurr || battUnderVolt || ledOverTemp ){
+void checkAudibleAlarm(){
+  if ( errorLevel > 0 ){
     digitalWrite(alarmPin, HIGH);
   } else {
     digitalWrite(alarmPin, LOW);
   }
 }
 
-// The RGB indicator LED
+// Adjust the brightness level
+void setMainLeds(){
+  int increment = 0;
+  // Act upon error levels if necessary
+  // Errors cause a total shutdown
+  if ( errorLevel == 2 ){
+    systemLedLevelOut = 1;
+  }
+  // Warning sets LEDs to minimum brightness
+  else if ( errorLevel == 1 ){
+    systemLedLevelOut = systemLedLevelMin;
+  }
+  else if ( errorLevel == 0 ){
+    // Normal increase/decrease LED brightness
+    // The optimum system impedance is a curve, based on the alternator output voltage
+    // and some values determined during design and testing.
+    systemImpedanceOpt = systemImpedanceHi-(2.5*(alternatorVoltageIn-alternatorVoltageMin));
+
+    // Total system impedance
+    // Sort of a 'virtual' impedance, based on total power draw vs. alternator output voltage
+    systemImpedanceTotal = alternatorVoltageIn/(((alternatorVoltageIn*alternatorCurrentIn/1000.0)+(batteryVoltageIn*batteryCurrentIn/1000.0))/alternatorVoltageIn);
+    
+    if ( batteryCurrentIn >= batteryCurrentMax*0.66 ){
+      increment = -5*ledLevelIncrementNormal;
+    }      
+    // Impedance is low (heavy load on the alternator)
+    else if ( systemImpedanceTotal <= (systemImpedanceOpt ) ){  
+      increment = -1*ledLevelIncrementNormal;
+    }
+    // Impedance is high (light load on the alternator)
+    else if ( systemImpedanceTotal >= (systemImpedanceOpt + systemImpedanceGap) ){  
+      increment = ledLevelIncrementNormal;
+    }
+    
+    // Normal brightness adjustment
+    systemLedLevelOut = systemLedLevelOut + increment;
+    
+    if ( systemLedLevelOut <= 1 ){                       // Capture if we've shut down the LED
+      systemLedLevelOut = 1;                             // and make sure it shuts down
+    }
+    else if ( systemLedLevelOut > systemLedLevelMax ){   // If we're above the global max
+      systemLedLevelOut = systemLedLevelMax;             // Then set output to maximum
+    }
+    else if ( systemLedLevelOut < systemLedLevelMin ){   // If we're below the global min
+      systemLedLevelOut = systemLedLevelMin;             // Then set output to minimum
+    }
+  }
+  // Write out the level to the LEDs
+  if ( systemLedLevelOut >= dacRange ){        // If we're above LED1 max
+    led1Level = dacRange;                      // Then set LED1 to max
+  } else {
+    led1Level = systemLedLevelOut;             // Otherwise set LED1 to value
+  }
+  if ( systemLedLevelOut <= led2Offset ){      // If we're below LED2 min
+    led2Level = 1;                             // Then set LED2 to off
+  } else {
+    led2Level = systemLedLevelOut-led2Offset;  // Otherwise set LED2 to value
+  }
+  Led1.setVoltage(dacRange - led1Level, false);
+  Led2.setVoltage(dacRange - led2Level, false);
+}
+
+// Power status
+void checkPowerStatus(){
+// 0 - batt lo
+// 1 - batt OK, alt lo
+// 2 - batt OK, alt OK
+// 3 - batt OK, alt OK, charge
+// 4 - batt OK, alt OK, done
+  if ( batteryVoltageIn > batteryVoltageMin ){
+    powerStatus = 1;
+    if ( alternatorVoltageIn >= alternatorVoltageMin ) {
+      powerStatus = 2;
+      if ( batteryChargeGood ){
+        powerStatus = 3;
+        if ( batteryChargeDone ){
+          powerStatus = 4;
+        }
+      }
+    }
+  }
+}
+
+/*
+The RGB indicator LED
+Power Status
+0 - Red (we never actually get here, because errorLevel 2 is the same place)
+1 - Yel
+2 - Grn
+3 - Blu
+4 - Wht
+
+Error level
+1 - Yel blink
+2 - Red blink
+*/
+void checkIndicatorState(){                                  // Checks the timer and flips the LED state
+  if ( millis() >= indicatorBlinkTime ){                     // If it's time
+    indicatorBlinkState = !indicatorBlinkState;              // Flip the led state
+    indicatorBlinkTime = millis() + indicatorBlinkInterval;  // Increment the timer
+  }
+}
+
 void setIndicatorLed(){
-  // We have a RGB LED to play with
-  // Normal operation is green
-  digitalWrite(indicatorRedPin, LOW); digitalWrite(indicatorGreenPin, HIGH); digitalWrite(indicatorBluePin, LOW);
-  // On battery only, yellow
-  if ( alternatorVoltageIn <= alternatorVoltageMin ){ digitalWrite(indicatorRedPin, HIGH); digitalWrite(indicatorGreenPin, HIGH); digitalWrite(indicatorBluePin, LOW); }
-  // Alarm condition is red
-  if ( altOverVolt || altOverCurr || battOverCurr || battUnderVolt || ledOverTemp ){ digitalWrite(indicatorRedPin, HIGH); digitalWrite(indicatorGreenPin, LOW); digitalWrite(indicatorBluePin, LOW); }
+  if ( errorLevel == 2 ){
+    // Blink red
+    checkIndicatorState();
+    digitalWrite(indicatorRedPin, indicatorBlinkState);
+    digitalWrite(indicatorGreenPin, LOW);
+    digitalWrite(indicatorBluePin, LOW);
+  }
+  else if ( errorLevel == 1 ){
+    // Blink yellow
+    checkIndicatorState();
+    digitalWrite(indicatorRedPin, indicatorBlinkState);
+    digitalWrite(indicatorGreenPin, indicatorBlinkState);
+    digitalWrite(indicatorBluePin, LOW);
+  }
+  else if ( errorLevel == 0 ){
+    switch (powerStatus){
+      case 1:
+        // Yellow
+        digitalWrite(indicatorRedPin, HIGH);
+        digitalWrite(indicatorGreenPin, HIGH);
+        digitalWrite(indicatorBluePin, LOW);
+        break;
+      case 2:
+        // Green
+        digitalWrite(indicatorRedPin, LOW);
+        digitalWrite(indicatorGreenPin, HIGH);
+        digitalWrite(indicatorBluePin, LOW);
+        break;
+      case 3:
+        // Blue
+        digitalWrite(indicatorRedPin, LOW);
+        digitalWrite(indicatorGreenPin, LOW);
+        digitalWrite(indicatorBluePin, HIGH);
+        break;
+      case 4:
+        // White
+        digitalWrite(indicatorRedPin, HIGH);
+        digitalWrite(indicatorGreenPin, HIGH);
+        digitalWrite(indicatorBluePin, HIGH);
+        break;
+    }
+  }
 }
 
 // The main loop
 void loop(){
-  digitalWrite(led1EnablePin, LOW);
-  digitalWrite(led2EnablePin, LOW);
+  // Reset these each loop; events build them up during each pass
+  errorLevel = 0;
+  powerStatus = 0;
+  // Bring in a new set of data
   readSensors();
-  checkAltOverVoltage();
-  checkBattOverCurrent();
-  checkBattUnderVoltage();
-  checkAltOverCurrent();
-  checkLedOverTemp();
-  checkAlarm();
-  adjustSystemLedLevel();
-  setIndicatorLed();
+  // Make sure we're running within bounds on all sensors
+  checkThresholds();
+  // Make noise if anything is out of tolerance
+  checkAudibleAlarm();
+  // Update the headlight
+  setMainLeds();
+  // human interface is slowed to once per displayUpdateInterval millis()
+  if ( millis() >= displayUpdateTime + displayUpdateInterval ){
+    displayUpdateTime = millis();
+    // Gather data for the indicator LED
+    checkPowerStatus();
+    // Update the LED
+    setIndicatorLed();
 #ifdef DEBUG
-  updateSerial();
+    // And if we're in DEBUG, update serial
+    updateSerial();
 #endif
+  }
 }
 
 // Debug output to serial
 #ifdef DEBUG
 void updateSerial(){
-  if ( millis() >= displayUpdateTime + displayUpdateInterval ){
-    displayUpdateTime = millis();
-    //Serial.print("Now:  "); Serial.print(systemPowerTotal); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
-    Serial.print("LED1: "); Serial.print(dacRange-led1Level); Serial.print("\tLED2:         "); Serial.println(dacRange-led2Level);
-    Serial.print("AltV: "); Serial.print(alternatorVoltageIn); Serial.print(" V"); Serial.print("\tAltC: "); Serial.print(alternatorCurrentIn); Serial.println(" mA");
-    Serial.print("BatV: "); Serial.print(batteryVoltageIn); Serial.print(" V"); Serial.print("\tBatC: "); Serial.print(batteryCurrentIn); Serial.println(" mA");
-    Serial.print("LEDT: "); Serial.println(systemLedTemperatureIn);
-    Serial.println();
-  }
+  Serial.print("Now:  "); Serial.print(systemImpedanceTotal); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
+  Serial.print("LED1: "); Serial.print(dacRange-led1Level); Serial.print("\tLED2:         "); Serial.println(dacRange-led2Level);
+  Serial.print("AltV: "); Serial.print(alternatorVoltageIn); Serial.print(" V"); Serial.print("\tAltC: "); Serial.print(alternatorCurrentIn); Serial.println(" mA");
+  Serial.print("BatV: "); Serial.print(batteryVoltageIn); Serial.print(" V"); Serial.print("\tBatC: "); Serial.print(batteryCurrentIn); Serial.println(" mA");
+  Serial.print("LEDT: "); Serial.println(systemLedTemperatureIn);
+  Serial.println();
 }
 #endif
 
