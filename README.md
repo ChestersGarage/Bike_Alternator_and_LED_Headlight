@@ -6,7 +6,7 @@ Runs on an Arduino/ATMega328P 16MHz.
 
 * LED brightness statically mapped against alternator output voltage, in consideration of:
   - Alternator voltage above minimum, and below battery backup threshold.
-  - Alternator voltage above battery backup threhold.
+  - Alternator voltage above battery backup threshold.
   - LED temperature.
 * Voltage-proportional battery charge current near alternator voltage minimum.
 * Audible alarm if any parameters are beyond critical thresholds.
