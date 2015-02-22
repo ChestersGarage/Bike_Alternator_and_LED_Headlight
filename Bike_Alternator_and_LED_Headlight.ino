@@ -52,7 +52,8 @@ Adafruit_MCP4725 Led2;
 // Alternator
 float alternatorVoltageIn;            // Alternator output voltage (V)
 float alternatorVoltageMax = 35.0;    // Above this value (V), the LEDs are forced to maximum brightness and the alarm is sounded
-float alternatorVoltageMin = 5.5;     // Below this value (V), the LEDs are forced to minimum brightness
+float alternatorVoltageHi = 20.0;
+float alternatorVoltageMin = 7.0;     // Below this value (V), the LEDs are forced to minimum brightness
 float alternatorCurrentIn;            // Alternator output current (mA)
 float alternatorCurrentMax = 3.0;  // Maximum alternator output current (mA)
 //float alternatorPowerIn;
@@ -78,10 +79,12 @@ int systemLedTemperatureHi = 650;   // High water mark LED temperature.  Decreas
 // Dimming is on an inverted scale: 4095=off, 0=max
 // Useful dimming range in terms of DAC: 106 - 3686
 long dacRange = 4096;                       // Resolution of the LED dimming output
+long ledDeadZoneLow = 900;
 long led1Level;                             // Output value for LED1
 long led2Level;                             // Output value for LED2
 long led2Offset = dacRange*75/100;          // LED2 starts to turn on after about 75% brightness on LED1
-long systemLedLevelMin = 1150;              // Dead zone at the lowest LED level
+long systemLedLevelBbu=2500;
+long systemLedLevelMin = 1150;              // Dead zone at the lowest LED level;
 long systemLedLevelOut = systemLedLevelMin; // System LED brightness level 
 long systemLedLevelMax = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
 long ledLevelIncrementNormal = 25;          // LED output increment value
@@ -131,7 +134,7 @@ void setup() {
   Led1.setVoltage(4095, true);
   Led2.setVoltage(4095, true);
 #ifdef DEBUG
-  Serial.print("Valt\tIalt\tVbat\tIbat\tVbbu\tNow\tOpt\tGap\tLED1\tLED2\tTled");
+  Serial.println("Valt\tIalt\tVbat\tIbat\tVbbu\tNow\tOpt\tGap\tLED1\tLED2\tTled");
 #endif
 }
 
@@ -189,30 +192,17 @@ void setMainLeds(){
     systemLedLevelOut = systemLedLevelMin;
   }
   else if ( errorLevel == 0 ){
-    // Normal increase/decrease LED brightness
-    // The optimum system impedance is a curve, based on the alternator output voltage
-    // and some values determined during design and testing.
-    systemImpedanceOpt = systemImpedanceHi-(2.5*(alternatorVoltageIn-alternatorVoltageMin));
-
-    // Total system impedance
-    // Sort of a 'virtual' impedance, based on total power draw vs. alternator output voltage
-    systemImpedanceTotal = alternatorVoltageIn/(((alternatorVoltageIn*alternatorCurrentIn)+(batteryVoltageIn*batteryCurrentIn/1000.0))/alternatorVoltageIn);
-    
-    if ( batteryCurrentIn >= batteryCurrentMax*0.66 ){
-      increment = -5*ledLevelIncrementNormal;
-    }      
-    // Impedance is low (heavy load on the alternator)
-    else if ( systemImpedanceTotal <= (systemImpedanceOpt ) ){  
-      increment = -1*ledLevelIncrementNormal;
-    }
-    // Impedance is high (light load on the alternator)
-    else if ( systemImpedanceTotal >= (systemImpedanceOpt + systemImpedanceGap) ){  
-      increment = ledLevelIncrementNormal;
-    }
-    
     // Normal brightness adjustment
-    systemLedLevelOut = systemLedLevelOut + increment;
-    
+    if ( alternatorVoltageIn < alternatorVoltageMin ) {
+      systemLedLevelOut = systemLedLevelMin;
+    } 
+    else if ( alternatorVoltageIn >= alternatorVoltageMin && alternatorVoltageIn <= boostVoltageIn ) {
+      systemLedLevelOut = map(alternatorVoltageIn*1000,alternatorVoltageMin*1000,boostVoltageIn*1000,systemLedLevelMin,systemLedLevelBbu);
+    } 
+    else {
+      systemLedLevelOut = map(alternatorVoltageIn*1000,boostVoltageIn*1000,alternatorVoltageHi*1000,systemLedLevelBbu,systemLedLevelMax);
+    }
+
     if ( systemLedLevelOut <= 1 ){                       // Capture if we've shut down the LED
       systemLedLevelOut = 1;                             // and make sure it shuts down
     }
@@ -229,8 +219,8 @@ void setMainLeds(){
   } else {
     led1Level = systemLedLevelOut;             // Otherwise set LED1 to value
   }
-  if ( systemLedLevelOut <= led2Offset ){      // If we're below LED2 min
-    led2Level = 1;                             // Then set LED2 to off
+  if ( systemLedLevelOut <= led2Offset+ledDeadZoneLow ){      // If we're below LED2 min
+    led2Level = ledDeadZoneLow;                             // Then set LED2 to off
   } else {
     led2Level = systemLedLevelOut-led2Offset;  // Otherwise set LED2 to value
   }
@@ -363,8 +353,8 @@ void updateSerial(){
   Serial.print(systemImpedanceTotal); Serial.print("\t");
   Serial.print(systemImpedanceOpt); Serial.print("\t");
   Serial.print(systemImpedanceGap); Serial.print("\t");
-  Serial.print(dacRange-led1Level); Serial.print("\t");
-  Serial.print(dacRange-led2Level); Serial.print("\t");
+  Serial.print(led1Level); Serial.print("\t");
+  Serial.print(led2Level); Serial.print("\t");
   Serial.print(systemLedTemperatureIn);
   Serial.println();
 }
