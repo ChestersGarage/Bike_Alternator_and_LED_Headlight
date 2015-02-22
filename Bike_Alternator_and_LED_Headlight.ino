@@ -20,7 +20,7 @@
 #include <Adafruit_INA219.h>
 
 Adafruit_INA219 battVI(0x41);
-Adafruit_INA219 altVI(0x44);
+//Adafruit_INA219 altVI(0x44);
 Adafruit_MCP4725 Led1;
 Adafruit_MCP4725 Led2;
 
@@ -38,23 +38,23 @@ Adafruit_MCP4725 Led2;
 // 8
 // 9
 // 10
-// 11
-#define chargePin 12
+#define chargePowerPin 11
+#define chargeChargePin 12
 #define chargeDonePin 13
 
 #define ledTemperaturePin A0
 #define boostVoltagePin A1
-// A2
-// A3
-// A4
-// A5
+#define alternatorCurrentPin A2
+#define alternatorVoltagePin A3
+// A4 (SDA)
+// A5 (SCL)
 
 // Alternator
 float alternatorVoltageIn;            // Alternator output voltage (V)
-float alternatorVoltageMax = 25.5;    // Above this value (V), the LEDs are forced to maximum brightness and the alarm is sounded
+float alternatorVoltageMax = 35.0;    // Above this value (V), the LEDs are forced to maximum brightness and the alarm is sounded
 float alternatorVoltageMin = 5.5;     // Below this value (V), the LEDs are forced to minimum brightness
 float alternatorCurrentIn;            // Alternator output current (mA)
-float alternatorCurrentMax = 3000.0;  // Maximum alternator output current (mA)
+float alternatorCurrentMax = 3.0;  // Maximum alternator output current (mA)
 //float alternatorPowerIn;
 
 // Battery
@@ -84,11 +84,11 @@ long led2Offset = dacRange*75/100;          // LED2 starts to turn on after abou
 long systemLedLevelMin = 1150;              // Dead zone at the lowest LED level
 long systemLedLevelOut = systemLedLevelMin; // System LED brightness level 
 long systemLedLevelMax = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
-long ledLevelIncrementNormal = 100;          // LED output increment value
+long ledLevelIncrementNormal = 25;          // LED output increment value
 
 // System impedance
 float systemImpedanceOpt;           // The calculated optimum system impedance, in Ohms.
-float systemImpedanceGap = 4;       // systemImpedanceTotal allowed to be this much less than systemImpedanceOpt. Reduces flicker.
+#define systemImpedanceGap systemImpedanceOpt*0.25        // systemImpedanceTotal allowed to be this much less than systemImpedanceOpt. Reduces flicker.
 float systemImpedanceTotal;         // The calculated total system impedance.
 // LED brightness adjusted per "systemImpedanceOpt = systemImpedanceHi-(3*(alternatorVoltageIn-alternatorVoltageMin));"
 //float systemImpedanceRef = 33.0;  // Based on offline device testing, this is a point that has to be met along the calculated impedance curve (at 14V output)
@@ -108,7 +108,7 @@ void setup() {
   Serial.begin(115200);
 #endif
   battVI.begin();
-  altVI.begin();
+//  altVI.begin();
   Led1.begin(0x63);
   Led2.begin(0x62);
   pinMode(alarmPin, OUTPUT);
@@ -119,7 +119,8 @@ void setup() {
   pinMode(led2EnablePin, OUTPUT);
   pinMode(boostVoltagePin, INPUT);
   pinMode(ledTemperaturePin, INPUT);
-  pinMode(chargePin, INPUT);
+  pinMode(chargePowerPin, INPUT);
+  pinMode(chargeChargePin, INPUT);
   pinMode(chargeDonePin, INPUT);
   digitalWrite(alarmPin, LOW);
   digitalWrite(indicatorRedPin, LOW);
@@ -129,18 +130,26 @@ void setup() {
   digitalWrite(led2EnablePin, LOW);
   Led1.setVoltage(4095, true);
   Led2.setVoltage(4095, true);
+#ifdef DEBUG
+  Serial.print("Valt\tIalt\tVbat\tIbat\tVbbu\tNow\tOpt\tGap\tLED1\tLED2\tTled");
+#endif
 }
 
 // Read all sensor values in a single pass
 void readSensors(){
-  alternatorVoltageIn  = altVI.getBusVoltage_V();
-  alternatorCurrentIn  = altVI.getCurrent_mA();
+//  alternatorVoltageIn  = altVI.getBusVoltage_V();
+//  alternatorCurrentIn  = altVI.getCurrent_mA();
+//  alternatorVoltageIn = 0.038242188*analogRead(alternatorVoltagePin);
+//  alternatorCurrentIn = analogRead(alternatorCurrentPin);
+  alternatorVoltageIn = analogRead(alternatorVoltagePin)*(40.0/1023.0);
+  alternatorCurrentIn = analogRead(alternatorCurrentPin)*(2.5/1023.0);
+
   batteryVoltageIn =    battVI.getBusVoltage_V();
   batteryCurrentIn =    battVI.getCurrent_mA();
   systemLedTemperatureIn  = analogRead(ledTemperaturePin);
-  boostVoltageIn = analogRead(boostVoltagePin)*0.004882813/12.0*45.0;
-  // dac:819.2=4v 0.004882813V/div Vbbu/45*12=4 1024/5*4 33K and 12K 
-  batteryChargeGood = digitalRead(chargePin);
+//  boostVoltageIn = analogRead(boostVoltagePin)*0.004882813/12.0*45.0;
+  boostVoltageIn = analogRead(boostVoltagePin)*(18.75/1023.0);  // dac:819.2=4v 0.004882813V/div Vbbu/45*12=4 1024/5*4 33K and 12K 
+  batteryChargeGood = digitalRead(chargeChargePin);
   batteryChargeDone = digitalRead(chargeDonePin);
 }
 
@@ -187,7 +196,7 @@ void setMainLeds(){
 
     // Total system impedance
     // Sort of a 'virtual' impedance, based on total power draw vs. alternator output voltage
-    systemImpedanceTotal = alternatorVoltageIn/(((alternatorVoltageIn*alternatorCurrentIn/1000.0)+(batteryVoltageIn*batteryCurrentIn/1000.0))/alternatorVoltageIn);
+    systemImpedanceTotal = alternatorVoltageIn/(((alternatorVoltageIn*alternatorCurrentIn)+(batteryVoltageIn*batteryCurrentIn/1000.0))/alternatorVoltageIn);
     
     if ( batteryCurrentIn >= batteryCurrentMax*0.66 ){
       increment = -5*ledLevelIncrementNormal;
@@ -345,11 +354,18 @@ void loop(){
 // Debug output to serial
 #ifdef DEBUG
 void updateSerial(){
-  Serial.print("Now:  "); Serial.print(systemImpedanceTotal); Serial.print("\tOpt:  "); Serial.print(systemImpedanceOpt); Serial.print("\tGap:  "); Serial.println(systemImpedanceGap);
-  Serial.print("LED1: "); Serial.print(dacRange-led1Level); Serial.print("\tLED2:         "); Serial.println(dacRange-led2Level);
-  Serial.print("AltV: "); Serial.print(alternatorVoltageIn); Serial.print(" V"); Serial.print("\tAltC: "); Serial.print(alternatorCurrentIn); Serial.println(" mA");
-  Serial.print("BatV: "); Serial.print(batteryVoltageIn); Serial.print(" V"); Serial.print("\tBatC: "); Serial.print(batteryCurrentIn); Serial.println(" mA");
-  Serial.print("LEDT: "); Serial.println(systemLedTemperatureIn);
+//Serial.print("Valt\tIalt\tVbat\tIbat\tVbbu\tNow\tOpt\tGap\tLED1\tLED2\tTled");
+  Serial.print(alternatorVoltageIn); Serial.print("\t");
+  Serial.print(alternatorCurrentIn); Serial.print("\t");
+  Serial.print(batteryVoltageIn); Serial.print("\t");
+  Serial.print(batteryCurrentIn); Serial.print("\t");
+  Serial.print(boostVoltageIn); Serial.print("\t");
+  Serial.print(systemImpedanceTotal); Serial.print("\t");
+  Serial.print(systemImpedanceOpt); Serial.print("\t");
+  Serial.print(systemImpedanceGap); Serial.print("\t");
+  Serial.print(dacRange-led1Level); Serial.print("\t");
+  Serial.print(dacRange-led2Level); Serial.print("\t");
+  Serial.print(systemLedTemperatureIn);
   Serial.println();
 }
 #endif
