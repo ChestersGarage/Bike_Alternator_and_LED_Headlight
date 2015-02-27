@@ -25,7 +25,7 @@ Adafruit_MCP4725 Led1;
 Adafruit_MCP4725 Led2;
 
 // Comment out to disable debug output on serial
-#define DEBUG
+//#define DEBUG
 
 // Serial on 0
 // Serial on 1
@@ -52,7 +52,7 @@ Adafruit_MCP4725 Led2;
 // Alternator
 float alternatorVoltageIn;            // Alternator output voltage (V)
 float alternatorVoltageMax = 35.0;    // Above this value (V), the LEDs are forced to maximum brightness and the alarm is sounded
-float alternatorVoltageHi = 20.0;
+float alternatorVoltageHi = 30.0;
 float alternatorVoltageMin = 7.0;     // Below this value (V), the LEDs are forced to minimum brightness
 float alternatorCurrentIn;            // Alternator output current (mA)
 float alternatorCurrentMax = 3.0;  // Maximum alternator output current (mA)
