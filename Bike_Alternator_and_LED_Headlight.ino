@@ -30,15 +30,17 @@ Adafruit_MCP4725 Led2;
 // Serial on 0
 // Serial on 1
 #define indicatorLedsPin 2
+// 3
+// 4
 #define led1EnablePin 5
 #define led2EnablePin 6
 #define alarmPin 7
-// 8
-// 9
-// 10
 #define chargePowerPin 8
 #define chargeChargePin 9
 #define chargeDonePin 10
+// 11
+// 12
+// 13
 
 #define ledTemperaturePin A0
 #define boostVoltagePin A1
@@ -47,7 +49,7 @@ Adafruit_MCP4725 Led2;
 // A4 (SDA)
 // A5 (SCL)
 
-Adafruit_NeoPixel indicatorLeds = Adafruit_NeoPixel(3, indicatorLedsPin, NEO_RGB + NEO_KHZ400);
+Adafruit_NeoPixel indicatorLeds = Adafruit_NeoPixel(3, indicatorLedsPin, NEO_GRB + NEO_KHZ800);
 
 // Alternator
 float alternatorVoltageIn;            // Alternator output voltage (V)
@@ -62,8 +64,9 @@ byte alternatorStatus = 0;
 
 // Battery
 float batteryVoltageIn;            // Battery voltage (V)
-float batteryVoltageMin = 3.3;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
-float batteryVoltageMid = 3.8;     // Mid-point battery voltage
+float batteryVoltageMin = 3.5;     // Below this value (V), LEDs are forced to OFF and the alarm is sounded
+float batteryVoltageLow = 3.7;     // Battery is low and needs to charge
+float batteryVoltageMid = 4.0;     // Mid-point battery voltage
 float batteryVoltageMax = 4.2;     // Battery is charged and/or charger is bypassing battery
 float batteryCurrentIn;            // Battery backup drain current (mA)
 float batteryCurrentMax = 1500.0;  // Above this value (mA), the LED brightness is decreased and the alarm is sounded
@@ -93,6 +96,10 @@ long systemLedLevelBbu = 2500;
 long systemLedLevelMin = 1150;              // Dead zone at the lowest LED level;
 long systemLedLevelOut = systemLedLevelMin; // System LED brightness level 
 long systemLedLevelMax = dacRange*175/100;  // Maximum system LED brightness. LED levels are mapped into this so that LED1 is almost full bright before LED2 starts to light.
+
+// Alarm
+int alarmAudibleDuration = 1000;  // How long the alarm sounds each time it's triggered
+uint32_t alarmAudibleTime;        // The time in millis() when the alarm went audible
 
 // System
 byte errorLevel = 0;
@@ -160,8 +167,9 @@ void checkThresholds(){
 // The audible alarm
 void checkAudibleAlarm(){
   if ( errorLevel > 0 ){
+    alarmAudibleTime = millis();
     digitalWrite(alarmPin, HIGH);
-  } else {
+  } else if ( millis() >= (alarmAudibleTime + alarmAudibleDuration) ){
     digitalWrite(alarmPin, LOW);
   }
 }
@@ -210,10 +218,11 @@ void setMainLeds(){
 void checkPowerStatus(){
 /* Alternator Status
 0 - Red < 5V
-1 - Grn 5V-7V (Vvpcc)
-2 - Blu 7V-Vbbu
-3 - Wht Vbbu-Vmax
-4 - ERR > Vmax (Red blink)
+1 - Yel 5V-7V (Vvpcc)
+2 - Grn 7V-Vbbu
+3 - Blu Vbbu-Vhi
+4 - Wht Vhi-Vmax
+5 - ERR > Vmax (Red blink)
 */
   if ( alternatorVoltageIn < alternatorVoltageMin ){
     alternatorStatus = 0;
@@ -221,31 +230,36 @@ void checkPowerStatus(){
     alternatorStatus = 1;
   } else if ( alternatorVoltageIn >= alternatorVoltageVpcc && alternatorVoltageIn < boostVoltageIn ){
     alternatorStatus = 2;
-  } else if ( alternatorVoltageIn >= boostVoltageIn && alternatorVoltageIn < alternatorVoltageMax ){
+  } else if ( alternatorVoltageIn >= boostVoltageIn && alternatorVoltageIn < alternatorVoltageHi ){
     alternatorStatus = 3;
-  } else if ( alternatorVoltageIn >= alternatorVoltageMax ){
+  } else if ( alternatorVoltageIn >= alternatorVoltageHi && alternatorVoltageIn < alternatorVoltageMax ){
     alternatorStatus = 4;
+  } else if ( alternatorVoltageIn >= alternatorVoltageMax ){
+    alternatorStatus = 5;
   }
 /* Battery Status
-0 - Red < 3.3V (Red blink)
-1 - Grn 3.3V-3.8V
-2 - Blu 3.8V-4.2V
-3 - Wht > 4.2V
+0 - Red < 3.5V (Red blink)
+1 - Yel 3.5V-3.7V
+2 - Grn 3.7V-4.0V
+3 - Blu 4.0V-4.2V
+4 - Wht > 4.2V
 */
-  if ( batteryVoltageIn < batteryVoltageMin ){
+  if ( batteryVoltageIn <= batteryVoltageMin ){
     batteryStatus = 0;
-  } else if ( batteryVoltageIn >= batteryVoltageMin && batteryVoltageIn < batteryVoltageMid ){
+  } else if ( batteryVoltageIn > batteryVoltageMin && batteryVoltageIn <= batteryVoltageLow ){
     batteryStatus = 1;
-  } else if ( batteryVoltageIn >= batteryVoltageMid && batteryVoltageIn < batteryVoltageMax ){
+  } else if ( batteryVoltageIn > batteryVoltageLow && batteryVoltageIn <= batteryVoltageMid ){
     batteryStatus = 2;
-  } else if ( batteryVoltageIn >= batteryVoltageMax ){
+  } else if ( batteryVoltageIn > batteryVoltageMid && batteryVoltageIn <= batteryVoltageMax ){
     batteryStatus = 3;
+  } else if ( batteryVoltageIn > batteryVoltageMax ){
+    batteryStatus = 4;
   } 
 /* Charge Status
 0 - Red No power
-1 - Grn Power, no charge
+1 - Yel Power, no charge
 2 - ERR Battery < 3.1V (Red blink)
-3 - Blu Charge
+3 - Grn Charge
 5 - Wht Done charging
 7 - ERR Temperature (Red blink)
 */
@@ -286,31 +300,43 @@ void setIndicatorLed(){
     indicatorBlinkState = HIGH;
   } else {
   }
+
+  uint32_t indOff = indicatorLeds.Color(0,0,0);
+  uint32_t indRed = indicatorLeds.Color(5,0,0);
+  uint32_t indYel = indicatorLeds.Color(5,5,0);
+  uint32_t indGreen = indicatorLeds.Color(0,5,0);
+  uint32_t indBlue = indicatorLeds.Color(0,0,5);
+  uint32_t indWhite = indicatorLeds.Color(5,5,5);
+  
   
   switch (alternatorStatus){
     case 0:
       // Red
-      indicatorLeds.setPixelColor(2, indicatorLeds.Color(1,0,0));
+      indicatorLeds.setPixelColor(2, indRed);
       break;
     case 1:
-      // Green
-      indicatorLeds.setPixelColor(2, indicatorLeds.Color(0,1,0));
+      // Yellow
+      indicatorLeds.setPixelColor(2, indYel);
       break;
     case 2:
-      // Blue
-      indicatorLeds.setPixelColor(2, indicatorLeds.Color(0,0,1));
+      // Green
+      indicatorLeds.setPixelColor(2, indGreen);
       break;
     case 3:
-      // White
-      indicatorLeds.setPixelColor(2, indicatorLeds.Color(1,2,1));
+      // Blue
+      indicatorLeds.setPixelColor(2, indBlue);
       break;
     case 4:
+      // Blue
+      indicatorLeds.setPixelColor(2, indWhite);
+      break;
+    case 5:
       // Red Blink
       if ( indicatorBlinkState == HIGH ) {
-        indicatorLeds.setPixelColor(2, indicatorLeds.Color(1,0,0));
+        indicatorLeds.setPixelColor(2, indRed);
       }
       else {
-        indicatorLeds.setPixelColor(2, indicatorLeds.Color(0,0,0));
+        indicatorLeds.setPixelColor(2, indOff);
       }
       break;
   }
@@ -318,55 +344,59 @@ void setIndicatorLed(){
     case 0:
       // Red
       if ( indicatorBlinkState == HIGH ) {
-        indicatorLeds.setPixelColor(1, indicatorLeds.Color(1,0,0));
+        indicatorLeds.setPixelColor(1, indRed);
       } else {
-        indicatorLeds.setPixelColor(1, indicatorLeds.Color(0,0,0));
+        indicatorLeds.setPixelColor(1, indOff);
       }
       break;
     case 1:
-      // Green
-      indicatorLeds.setPixelColor(1, indicatorLeds.Color(0,1,0));
+      // Yellow
+      indicatorLeds.setPixelColor(1, indYel);
       break;
     case 2:
-      // Blue
-      indicatorLeds.setPixelColor(1, indicatorLeds.Color(0,0,1));
+      // Green
+      indicatorLeds.setPixelColor(1, indGreen);
       break;
     case 3:
+      // Blue
+      indicatorLeds.setPixelColor(1, indBlue);
+      break;
+    case 4:
       // White
-      indicatorLeds.setPixelColor(1, indicatorLeds.Color(1,2,1));
+      indicatorLeds.setPixelColor(1, indWhite);
       break;
   }
   switch (chargeStatus){
     case 0:
       // Red
-      indicatorLeds.setPixelColor(0, indicatorLeds.Color(1,0,0));
+      indicatorLeds.setPixelColor(0, indRed);
       break;
     case 1:
-      // Green
-      indicatorLeds.setPixelColor(0, indicatorLeds.Color(0,1,0));
+      // Yellow
+      indicatorLeds.setPixelColor(0, indYel);
       break;
     case 2:
       // Red blink
       if ( indicatorBlinkState == HIGH ) {
-        indicatorLeds.setPixelColor(0, indicatorLeds.Color(1,0,0));
+        indicatorLeds.setPixelColor(0, indRed);
       } else {
-        indicatorLeds.setPixelColor(0, indicatorLeds.Color(0,0,0));
+        indicatorLeds.setPixelColor(0, indOff);
       }
       break;
     case 3:
-      // Blue
-      indicatorLeds.setPixelColor(0, indicatorLeds.Color(0,0,1));
+      // Green
+      indicatorLeds.setPixelColor(0, indGreen);
       break;
     case 5:
       // White
-      indicatorLeds.setPixelColor(0, indicatorLeds.Color(1,2,1));
+      indicatorLeds.setPixelColor(0, indWhite);
       break;
     case 7:
       // Red blink
       if ( indicatorBlinkState == HIGH ) {
-        indicatorLeds.setPixelColor(0, indicatorLeds.Color(1,0,0));
+        indicatorLeds.setPixelColor(0, indRed);
       } else {
-        indicatorLeds.setPixelColor(0, indicatorLeds.Color(0,0,0));
+        indicatorLeds.setPixelColor(0, indOff);
       }
       break;
   }
@@ -422,4 +452,3 @@ void updateSerial(){
   Serial.println();
 }
 #endif
-
